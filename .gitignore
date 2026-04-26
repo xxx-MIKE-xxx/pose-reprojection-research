@@ -1,0 +1,8 @@
+.env/
+__pycache__/
+*.pyc
+checkpoints/
+data/raw/
+data/processed/
+outputs/
+third_party/mmpose/
