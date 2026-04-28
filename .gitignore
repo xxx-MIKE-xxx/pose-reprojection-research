@@ -6,3 +6,16 @@ data/raw/
 data/processed/
 outputs/
 third_party/mmpose/
+
+# build artifacts
+wheels/
+third_party/mmcv-sm120/
+*.whl
+
+# local model/runtime caches
+*.onnx
+*.engine
+
+# generated experiment outputs
+outputs/
+data/processed/
