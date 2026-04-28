@@ -19,3 +19,7 @@ third_party/mmcv-sm120/
 # generated experiment outputs
 outputs/
 data/processed/
+
+# 3D lifter external repos/checkpoints
+third_party/VideoPose3D/
+checkpoints/videopose3d/
