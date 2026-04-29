@@ -1,0 +1,5 @@
+{
+  "method": "identity",
+  "description": "Sanity-check POC that returns input keypoints unchanged.",
+  "version": 1
+}

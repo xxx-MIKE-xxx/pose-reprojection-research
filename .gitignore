@@ -23,3 +23,6 @@ data/processed/
 # 3D lifter external repos/checkpoints
 third_party/VideoPose3D/
 checkpoints/videopose3d/
+
+# generated POC outputs
+outputs/poc/
