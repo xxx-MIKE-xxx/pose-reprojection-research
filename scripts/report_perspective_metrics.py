@@ -18,7 +18,8 @@ def main():
     data = json.loads(args.metrics.read_text(encoding="utf-8"))
 
     frozen = data["methods"]["frozen_lifter"]
-    xgeo = data["methods"].get("x_geo")
+    xgeo = data["methods"].get("x_geo_used", data["methods"].get("x_geo"))
+    xgeo_label = "X_geo used" if bool(data.get("xgeo_ablation_applied", False)) else "X_geo raw"
     corr = data["methods"]["perspective_corrected"]
 
     metric_keys = [
@@ -60,6 +61,13 @@ def main():
     geom_ref = data.get("geometry_refinement", {})
     lines.append(f"Geometry refinement: `{bool(geom_ref.get('enabled', False))}`")
     lines.append(f"Geometry refinement mode: `{data.get('geometry_refinement_mode', geom_ref.get('mode', 'ray_depth_fit'))}`")
+    lines.append(f"X_geo ablation: `{data.get('xgeo_ablation', 'none')}`")
+    lines.append(f"X_geo ablation applied: `{bool(data.get('xgeo_ablation_applied', False))}`")
+    lines.append(f"X_geo used source: `{data.get('xgeo_ablation_source', 'true_x_geo')}`")
+    if data.get("xgeo_raw_mpjpe_mm") is not None:
+        lines.append(f"Raw X_geo MPJPE: `{data.get('xgeo_raw_mpjpe_mm'):.4f} mm`")
+    if data.get("xgeo_used_mpjpe_mm") is not None:
+        lines.append(f"Pc-used X_geo MPJPE: `{data.get('xgeo_used_mpjpe_mm'):.4f} mm`")
     if data.get("dataset_hash"):
         lines.append(f"Dataset SHA256: `{data.get('dataset_hash')}`")
     if data.get("split_subjects"):
@@ -78,7 +86,7 @@ def main():
         lines.append("| Metric | Frozen lifter | Pc corrected | Delta | Delta % |")
         lines.append("|---|---:|---:|---:|---:|")
     else:
-        lines.append("| Metric | Frozen lifter | X_geo only | Pc corrected | Pc delta vs frozen | Pc delta % |")
+        lines.append(f"| Metric | Frozen lifter | {xgeo_label} | Pc corrected | Pc delta vs frozen | Pc delta % |")
         lines.append("|---|---:|---:|---:|---:|---:|")
 
     for name, key in metric_keys:

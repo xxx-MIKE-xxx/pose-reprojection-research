@@ -22,7 +22,7 @@ class CameraSequenceDataset(Dataset):
     def __getitem__(self, i):
         idx = int(self.indices[i])
         keys = ["x_gt", "u_px", "u_norm", "raw_2d_metadata", "z", "z_features", "y_lifted"]
-        for optional in ["ray_features", "x_geo"]:
+        for optional in ["ray_features", "x_geo", "x_geo_used"]:
             if optional in self.arrays:
                 keys.append(optional)
         return {k: self.arrays[k][idx].astype(np.float32) for k in keys}
@@ -38,6 +38,10 @@ def _to_device(batch, device):
     return {k: torch.as_tensor(v, dtype=torch.float32, device=device) for k, v in batch.items()}
 
 
+def _x_geo_used(batch):
+    return batch.get("x_geo_used", batch.get("x_geo"))
+
+
 def evaluate_epoch(model, loader, config, device):
     model.eval()
     sums = {}
@@ -45,6 +49,7 @@ def evaluate_epoch(model, loader, config, device):
     with torch.no_grad():
         for batch in loader:
             batch = _to_device(batch, device)
+            x_geo_used = _x_geo_used(batch)
             features = build_features(
                 corrector_y_input(batch["y_lifted"], config),
                 batch["u_norm"],
@@ -52,10 +57,10 @@ def evaluate_epoch(model, loader, config, device):
                 batch["z_features"],
                 config["corrector_inputs"],
                 ray_features=batch.get("ray_features"),
-                x_geo_features=corrector_pose_input(batch["x_geo"], config) if "x_geo" in batch else None,
+                x_geo_features=corrector_pose_input(x_geo_used, config) if x_geo_used is not None else None,
             )
             model_output = model(features)
-            x_hat = compose_prediction(batch["y_lifted"], model_output, config, x_geo=batch.get("x_geo"))
+            x_hat = compose_prediction(batch["y_lifted"], model_output, config, x_geo=x_geo_used)
             losses = compute_losses(x_hat, batch["x_gt"], batch["u_px"], batch["z"], config["losses"])
             bs = batch["x_gt"].shape[0]
             for k, v in losses.items():
@@ -126,6 +131,7 @@ def train_corrector(arrays, config, out_dir):
 
         for batch in train_loader:
             batch = _to_device(batch, device)
+            x_geo_used = _x_geo_used(batch)
             features = build_features(
                 corrector_y_input(batch["y_lifted"], config),
                 batch["u_norm"],
@@ -133,10 +139,10 @@ def train_corrector(arrays, config, out_dir):
                 batch["z_features"],
                 config["corrector_inputs"],
                 ray_features=batch.get("ray_features"),
-                x_geo_features=corrector_pose_input(batch["x_geo"], config) if "x_geo" in batch else None,
+                x_geo_features=corrector_pose_input(x_geo_used, config) if x_geo_used is not None else None,
             )
             model_output = model(features)
-            x_hat = compose_prediction(batch["y_lifted"], model_output, config, x_geo=batch.get("x_geo"))
+            x_hat = compose_prediction(batch["y_lifted"], model_output, config, x_geo=x_geo_used)
 
             losses = compute_losses(x_hat, batch["x_gt"], batch["u_px"], batch["z"], config["losses"])
             opt.zero_grad(set_to_none=True)

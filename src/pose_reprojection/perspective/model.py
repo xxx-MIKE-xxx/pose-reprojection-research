@@ -125,6 +125,7 @@ def infer_input_dim(sample, input_cfg):
     z_key = "z_features" if "z_features" in sample else "z"
     z = torch.from_numpy(sample[z_key][:1])
     ray = torch.from_numpy(sample["ray_features"][:1]) if "ray_features" in sample else None
-    x_geo = torch.from_numpy(sample["x_geo"][:1]) if "x_geo" in sample else None
+    x_geo_key = "x_geo_used" if "x_geo_used" in sample else "x_geo"
+    x_geo = torch.from_numpy(sample[x_geo_key][:1]) if x_geo_key in sample else None
     feat = build_features(y, u, m, z, input_cfg, ray_features=ray, x_geo_features=x_geo)
     return int(feat.shape[-1])

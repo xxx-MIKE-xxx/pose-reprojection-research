@@ -23,7 +23,7 @@ from pose_reprojection.perspective.lifter import run_frozen_lifter
 from pose_reprojection.perspective.train import train_corrector
 from pose_reprojection.perspective.evaluate import evaluate_and_save
 from pose_reprojection.perspective.visualize import visualize_outputs
-from pose_reprojection.perspective.features import prepare_z_features
+from pose_reprojection.perspective.features import prepare_z_features, apply_xgeo_ablation
 from pose_reprojection.perspective.geometry import ensure_geometry_arrays, prepare_ray_features
 from pose_reprojection.perspective.ray_fit import fit_xgeo_from_rays_and_lifter
 from pose_reprojection.perspective.reproducibility import seed_everything
@@ -138,6 +138,14 @@ def _write_ray_feature_manifest(out_dir, arrays):
         np.savez_compressed(perm_path, permutation=arrays["ray_feature_permutation"].astype(np.int64))
         info["permutation_path"] = str(perm_path)
     (out_dir / "ray_features_manifest.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
+    return info
+
+
+def _write_xgeo_ablation_manifest(out_dir, arrays):
+    info = {}
+    if "xgeo_ablation_info_json" in arrays:
+        info = json.loads(str(arrays["xgeo_ablation_info_json"]))
+    (out_dir / "xgeo_ablation_manifest.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
     return info
 
 
@@ -262,6 +270,8 @@ def step_geometry_refinement(config, out_dir, arrays, force=False):
                     encoding="utf-8",
                 )
             print("[x_geo] using compatible cache:", cache_path)
+            arrays = apply_xgeo_ablation(arrays, config)
+            _write_xgeo_ablation_manifest(out_dir, arrays)
             return arrays
 
     print("[x_geo] fitting ray-depth geometry candidate")
@@ -292,6 +302,8 @@ def step_geometry_refinement(config, out_dir, arrays, force=False):
     )
     print("[x_geo] saved:", cache_path)
     print("[x_geo] reprojection_to_input_px:", reproj)
+    arrays = apply_xgeo_ablation(arrays, config)
+    _write_xgeo_ablation_manifest(out_dir, arrays)
     return arrays
 
 
@@ -328,6 +340,8 @@ def run_all(args):
     arrays = step_geometry_refinement(config, out_dir, arrays, force=args.force)
     if "x_geo_fit_stats_json" in arrays:
         config["x_geo_fit_stats"] = json.loads(str(arrays["x_geo_fit_stats_json"]))
+    if "xgeo_ablation_info_json" in arrays:
+        config["xgeo_ablation_info"] = json.loads(str(arrays["xgeo_ablation_info_json"]))
     save_config(config, out_dir / "resolved_config.json")
 
     model, _ = train_corrector(arrays, config, out_dir)

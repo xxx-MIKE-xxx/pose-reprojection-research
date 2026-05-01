@@ -116,7 +116,8 @@ DEFAULT_CONFIG = {
             "temporal": 0.01,
             "depth_smooth": 0.001
         },
-        "cache": True
+        "cache": True,
+        "xgeo_ablation": "none"
     },
 
     "corrector_normalization": {

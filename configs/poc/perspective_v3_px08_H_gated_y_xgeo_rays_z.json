@@ -14,7 +14,8 @@
   "geometry_refinement": {
     "enabled": true,
     "mode": "ray_depth_fit",
-    "max_reprojection_error_to_input_px": 2.0
+    "max_reprojection_error_to_input_px": 2.0,
+    "xgeo_ablation": "none"
   },
   "geometry_features": {
     "enabled": true,

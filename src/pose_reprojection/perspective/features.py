@@ -124,6 +124,49 @@ def corrector_y_input(y_lifted, config):
     return corrector_pose_input(y_lifted, config)
 
 
+def apply_xgeo_ablation(arrays, config):
+    """Create arrays['x_geo_used'] for Pc inputs and residual bases.
+
+    arrays['x_geo'] remains the raw fitted geometry candidate for diagnostics.
+    """
+    mode = config.get("geometry_refinement", {}).get("xgeo_ablation", "none")
+    if "x_geo" not in arrays:
+        if mode == "none":
+            return arrays
+        raise KeyError("geometry_refinement.xgeo_ablation requires arrays['x_geo']")
+
+    if mode == "none":
+        used = arrays["x_geo"]
+        applied = False
+        source = "true_x_geo"
+    elif mode == "y_lifted":
+        if "y_lifted" not in arrays:
+            raise KeyError("geometry_refinement.xgeo_ablation='y_lifted' requires arrays['y_lifted']")
+        if arrays["y_lifted"].shape != arrays["x_geo"].shape:
+            raise ValueError(
+                f"y_lifted shape {arrays['y_lifted'].shape} does not match x_geo shape {arrays['x_geo'].shape}"
+            )
+        used = arrays["y_lifted"]
+        applied = True
+        source = "y_lifted"
+    elif mode == "zero":
+        used = np.zeros_like(arrays["x_geo"], dtype=np.float32)
+        applied = True
+        source = "zero"
+    else:
+        raise ValueError(f"Unknown geometry_refinement.xgeo_ablation: {mode}")
+
+    arrays["x_geo_used"] = np.asarray(used, dtype=np.float32)
+    arrays["xgeo_ablation_info_json"] = np.array(json.dumps({
+        "xgeo_ablation": mode,
+        "xgeo_ablation_applied": bool(applied),
+        "xgeo_ablation_source": source,
+        "x_geo_shape": list(arrays["x_geo"].shape),
+        "x_geo_used_shape": list(arrays["x_geo_used"].shape),
+    }))
+    return arrays
+
+
 def _residual_base_pose(y_lifted, x_geo, config):
     output_cfg = config.get("corrector_output", {})
     base = output_cfg.get("base", "y_lifted")
