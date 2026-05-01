@@ -26,3 +26,5 @@ checkpoints/videopose3d/
 
 # generated POC outputs
 outputs/poc/
+
+apply_*_patch.py
