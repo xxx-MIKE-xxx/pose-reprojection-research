@@ -1,0 +1,52 @@
+{
+  "experiment_name": "perspective_v3_px08_H_xgeo_as_y_true_rays_z",
+  "seed": 1234,
+  "output_dir": "outputs/poc/perspective_v3_px08_H_xgeo_as_y_true_rays_z",
+  "dataset": {
+    "reuse_synthetic_dataset": "outputs/poc/perspective_v2_fixed_px08_dataset/synthetic_dataset.npz"
+  },
+  "corrector_output": {
+    "mode": "residual",
+    "base": "gated_y_xgeo",
+    "gate_init_y_weight": 0.8,
+    "gate_mode": "joint_scalar"
+  },
+  "geometry_refinement": {
+    "enabled": true,
+    "mode": "ray_depth_fit",
+    "max_reprojection_error_to_input_px": 2.0,
+    "xgeo_ablation": "y_lifted"
+  },
+  "geometry_features": {
+    "enabled": true,
+    "use_input_rays": true,
+    "ray_feature_mode": "root_centered_unit_rays",
+    "canonicalize_root_ray": false,
+    "root_joint": 0
+  },
+  "corrector_inputs": {
+    "use_lifter_3d": true,
+    "use_geometry_fit_3d": true,
+    "use_ray_features": true,
+    "use_lifter_2d_normalized": true,
+    "use_raw_2d_metadata": true,
+    "use_camera_parameters": true,
+    "camera_feature_mode": "normalized_6d",
+    "z_ablation": "true",
+    "ray_ablation": "true"
+  },
+  "corrector_normalization": {
+    "enabled": true,
+    "root_joint": 0,
+    "scale_mode": "stable_bones",
+    "eps": 1e-06
+  },
+  "lifter": {
+    "batch_size": 4
+  },
+  "training": {
+    "epochs": 50,
+    "batch_size": 8,
+    "patience": 12
+  }
+}
