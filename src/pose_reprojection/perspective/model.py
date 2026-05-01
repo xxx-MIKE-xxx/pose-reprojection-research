@@ -1,12 +1,22 @@
 import torch
 from torch import nn
+import math
 
 
 class ResidualMLP(nn.Module):
-    def __init__(self, input_dim, num_joints=17, hidden_dims=(512, 512, 256), dropout=0.1, zero_init_last=True):
+    def __init__(
+        self,
+        input_dim,
+        num_joints=17,
+        hidden_dims=(512, 512, 256),
+        dropout=0.1,
+        zero_init_last=True,
+        output_cfg=None,
+    ):
         super().__init__()
         layers = []
-        prev = int(input_dim)
+        input_dim = int(input_dim)
+        prev = input_dim
 
         for h in hidden_dims:
             layers.append(nn.Linear(prev, int(h)))
@@ -17,21 +27,49 @@ class ResidualMLP(nn.Module):
             prev = int(h)
 
         out_dim = int(num_joints) * 3
-        last = nn.Linear(prev, out_dim)
+        self.trunk = nn.Sequential(*layers)
+        self.residual_head = nn.Linear(prev, out_dim)
         if zero_init_last:
-            nn.init.zeros_(last.weight)
-            nn.init.zeros_(last.bias)
-        layers.append(last)
+            nn.init.zeros_(self.residual_head.weight)
+            nn.init.zeros_(self.residual_head.bias)
 
-        self.net = nn.Sequential(*layers)
         self.num_joints = int(num_joints)
+        output_cfg = output_cfg or {}
+        self.output_base = output_cfg.get("base", "y_lifted")
+        self.gate_mode = output_cfg.get("gate_mode", "joint_scalar")
+        self.gate_head = None
+        if self.output_base == "gated_y_xgeo":
+            if self.gate_mode == "sequence_scalar":
+                gate_dim = 1
+            elif self.gate_mode == "joint_scalar":
+                gate_dim = self.num_joints
+            else:
+                raise ValueError(f"Unknown corrector_output.gate_mode: {self.gate_mode}")
+
+            gate_init = float(output_cfg.get("gate_init_y_weight", 0.8))
+            gate_init = min(max(gate_init, 1e-4), 1.0 - 1e-4)
+            gate_bias = math.log(gate_init / (1.0 - gate_init))
+            self.gate_head = nn.Linear(input_dim, gate_dim)
+            nn.init.zeros_(self.gate_head.weight)
+            nn.init.constant_(self.gate_head.bias, gate_bias)
 
     def forward(self, features):
         # features: (B,T,F)
         b, t, f = features.shape
         flat = features.reshape(b * t, f)
-        dx = self.net(flat).reshape(b, t, self.num_joints, 3)
-        return dx
+        hidden = self.trunk(flat)
+        dx = self.residual_head(hidden).reshape(b, t, self.num_joints, 3)
+        if self.gate_head is None:
+            return dx
+
+        gate_logits = self.gate_head(flat)
+        if self.gate_mode == "sequence_scalar":
+            gate = torch.sigmoid(gate_logits).reshape(b, t, 1, 1).expand(-1, -1, self.num_joints, -1)
+        elif self.gate_mode == "joint_scalar":
+            gate = torch.sigmoid(gate_logits).reshape(b, t, self.num_joints, 1)
+        else:
+            raise ValueError(f"Unknown corrector_output.gate_mode: {self.gate_mode}")
+        return {"residual": dx, "gate": gate}
 
 
 def build_features(y_lifted, u_norm, raw_meta, z_features, input_cfg, ray_features=None, x_geo_features=None):

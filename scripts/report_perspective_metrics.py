@@ -39,6 +39,16 @@ def main():
     lines.append(f"Test synthetic sequences: `{data.get('num_test_sequences')}`")
     lines.append(f"Correction mode: `{data.get('correction_mode', 'residual')}`")
     lines.append(f"Correction base: `{data.get('corrector_output_base', 'y_lifted')}`")
+    lines.append(f"Gate mode: `{data.get('gate_mode', 'joint_scalar')}`")
+    lines.append(f"Gate init Y weight: `{data.get('gate_init_y_weight', 0.8)}`")
+    if data.get("mean_gate_y_weight") is not None:
+        lines.append(
+            "Gate Y weight stats: "
+            f"mean `{data.get('mean_gate_y_weight'):.4f}`, "
+            f"std `{data.get('std_gate_y_weight'):.4f}`, "
+            f"min `{data.get('min_gate_y_weight'):.4f}`, "
+            f"max `{data.get('max_gate_y_weight'):.4f}`"
+        )
     norm = data.get("corrector_normalization", {})
     lines.append(f"Corrector normalization: `{bool(norm.get('enabled', False))}`")
     lines.append(f"Camera feature mode: `{data.get('camera_feature_mode', 'raw_9d')}`")

@@ -133,7 +133,31 @@ def _residual_base_pose(y_lifted, x_geo, config):
         if x_geo is None:
             raise ValueError("corrector_output.base='x_geo' requires geometry_refinement.enabled=true and arrays['x_geo']")
         return x_geo
+    if base == "gated_y_xgeo":
+        raise ValueError("corrector_output.base='gated_y_xgeo' requires a model gate; call _residual_base_pose_with_gate")
     raise ValueError(f"Unknown corrector_output.base: {base}")
+
+
+def _split_model_output(model_output):
+    if isinstance(model_output, dict):
+        if "residual" not in model_output:
+            raise ValueError("Model output dict is missing 'residual'")
+        return model_output["residual"], model_output.get("gate")
+    return model_output, None
+
+
+def _residual_base_pose_with_gate(y_lifted, x_geo, config, gate):
+    output_cfg = config.get("corrector_output", {})
+    base = output_cfg.get("base", "y_lifted")
+    if base != "gated_y_xgeo":
+        return _residual_base_pose(y_lifted, x_geo, config)
+    if x_geo is None:
+        raise ValueError("corrector_output.base='gated_y_xgeo' requires arrays['x_geo']")
+    if gate is None:
+        raise ValueError("corrector_output.base='gated_y_xgeo' requires a gate from the model")
+    if gate.shape[:3] != y_lifted.shape[:3] or gate.shape[-1] != 1:
+        raise ValueError(f"Gate shape {tuple(gate.shape)} is incompatible with Y shape {tuple(y_lifted.shape)}")
+    return gate * y_lifted + (1.0 - gate) * x_geo
 
 
 def compose_prediction(y_lifted, model_output, config, x_geo=None):
@@ -141,6 +165,7 @@ def compose_prediction(y_lifted, model_output, config, x_geo=None):
     mode = output_cfg.get("mode", "residual")
     norm_cfg = config.get("corrector_normalization", {})
     normalization_enabled = bool(norm_cfg.get("enabled", False))
+    residual, gate = _split_model_output(model_output)
 
     if normalization_enabled:
         if mode != "residual":
@@ -148,17 +173,19 @@ def compose_prediction(y_lifted, model_output, config, x_geo=None):
                 "corrector_output.mode='full_pose' is not supported with "
                 "corrector_normalization.enabled=true. Disable normalization for true no-Y full-pose experiments."
             )
-        base_pose = _residual_base_pose(y_lifted, x_geo, config)
+        base_pose = _residual_base_pose_with_gate(y_lifted, x_geo, config, gate)
         root_joint = int(norm_cfg.get("root_joint", 0))
         root_base = base_pose[:, :, root_joint:root_joint + 1, :]
         base_centered = base_pose - root_base
         scale_base = stable_body_scale_torch(base_centered, eps=float(norm_cfg.get("eps", 1e-6)))
         base_norm = base_centered / scale_base
-        x_hat_norm = base_norm + model_output
+        x_hat_norm = base_norm + residual
         return root_base + scale_base * x_hat_norm
 
     if mode == "residual":
-        return _residual_base_pose(y_lifted, x_geo, config) + model_output
+        return _residual_base_pose_with_gate(y_lifted, x_geo, config, gate) + residual
     if mode == "full_pose":
-        return model_output
+        if isinstance(model_output, dict):
+            raise ValueError("corrector_output.mode='full_pose' does not support gated model outputs")
+        return residual
     raise ValueError(f"Unknown corrector_output.mode: {mode}")

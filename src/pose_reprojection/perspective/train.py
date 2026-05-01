@@ -84,6 +84,7 @@ def train_corrector(arrays, config, out_dir):
         hidden_dims=config["model"]["hidden_dims"],
         dropout=float(config["model"].get("dropout", 0.1)),
         zero_init_last=bool(config["model"].get("zero_init_last", True)),
+        output_cfg=config.get("corrector_output", {}),
     ).to(device)
 
     train_generator = torch.Generator()

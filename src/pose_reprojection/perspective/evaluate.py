@@ -14,7 +14,19 @@ from .metrics import (
 )
 
 
-def predict_corrected(model, arrays, config, indices=None, device=None):
+def _gate_stats(gate):
+    if gate is None:
+        return {}
+    vals = np.asarray(gate, dtype=np.float64)
+    return {
+        "mean_gate_y_weight": float(vals.mean()),
+        "std_gate_y_weight": float(vals.std()),
+        "min_gate_y_weight": float(vals.min()),
+        "max_gate_y_weight": float(vals.max()),
+    }
+
+
+def predict_corrected(model, arrays, config, indices=None, device=None, return_aux=False):
     if indices is None:
         indices = np.arange(arrays["x_gt"].shape[0])
     indices = np.asarray(indices, dtype=np.int64)
@@ -24,6 +36,7 @@ def predict_corrected(model, arrays, config, indices=None, device=None):
 
     model.eval()
     outs = []
+    gate_outs = []
 
     with torch.no_grad():
         for idx in indices:
@@ -51,8 +64,17 @@ def predict_corrected(model, arrays, config, indices=None, device=None):
             model_output = model(feat)
             x_hat = compose_prediction(y, model_output, config, x_geo=x_geo)
             outs.append(x_hat.cpu().numpy()[0])
+            if isinstance(model_output, dict) and model_output.get("gate") is not None:
+                gate_outs.append(model_output["gate"].cpu().numpy()[0])
 
-    return np.stack(outs, axis=0).astype(np.float32)
+    x_hat = np.stack(outs, axis=0).astype(np.float32)
+    if not return_aux:
+        return x_hat
+    aux = {}
+    if gate_outs:
+        aux["gate_y_weight"] = np.stack(gate_outs, axis=0).astype(np.float32)
+        aux["gate_stats"] = _gate_stats(aux["gate_y_weight"])
+    return x_hat, aux
 
 
 def evaluate_and_save(model, arrays, config, out_dir):
@@ -68,7 +90,7 @@ def evaluate_and_save(model, arrays, config, out_dir):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
 
-    x_hat = predict_corrected(model, arrays, config, test_idx, device=device)
+    x_hat, pred_aux = predict_corrected(model, arrays, config, test_idx, device=device, return_aux=True)
     y = arrays["y_lifted"][test_idx]
     gt = arrays["x_gt"][test_idx]
     u_px = arrays["u_px"][test_idx]
@@ -108,6 +130,8 @@ def evaluate_and_save(model, arrays, config, out_dir):
         "external_baselines": load_external_baselines(config["evaluation"].get("external_baseline_jsons", [])),
         "correction_mode": config.get("corrector_output", {}).get("mode", "residual"),
         "corrector_output_base": config.get("corrector_output", {}).get("base", "y_lifted"),
+        "gate_mode": config.get("corrector_output", {}).get("gate_mode", "joint_scalar"),
+        "gate_init_y_weight": float(config.get("corrector_output", {}).get("gate_init_y_weight", 0.8)),
         "corrector_normalization": config.get("corrector_normalization", {"enabled": False}),
         "camera_feature_mode": config.get("corrector_inputs", {}).get("camera_feature_mode", "raw_9d"),
         "z_ablation": config.get("corrector_inputs", {}).get("z_ablation", "true"),
@@ -131,6 +155,9 @@ def evaluate_and_save(model, arrays, config, out_dir):
             "External raw/smoothed/identity baselines are included only if their JSON paths exist."
         ],
     }
+
+    if pred_aux.get("gate_stats"):
+        metrics.update(pred_aux["gate_stats"])
 
     if "x_geo" in methods:
         geo = methods["x_geo"]
@@ -178,6 +205,7 @@ def evaluate_and_save(model, arrays, config, out_dir):
         y_lifted=y,
         x_hat=x_hat,
         x_geo=x_geo if x_geo is not None else np.array([], dtype=np.float32),
+        gate_y_weight=pred_aux.get("gate_y_weight", np.array([], dtype=np.float32)),
         u_px=u_px,
         u_px_clean=u_px_clean if u_px_clean is not None else np.array([], dtype=np.float32),
         u_norm=arrays["u_norm"][test_idx],
@@ -191,6 +219,7 @@ def evaluate_and_save(model, arrays, config, out_dir):
         "frozen_lifter_mpjpe_mm": metrics["methods"]["frozen_lifter"]["mpjpe_mm"],
         "corrected_mpjpe_mm": metrics["methods"]["perspective_corrected"]["mpjpe_mm"],
         "xgeo_mpjpe_mm": metrics["methods"].get("x_geo", {}).get("mpjpe_mm"),
+        "mean_gate_y_weight": metrics.get("mean_gate_y_weight"),
         "frozen_lifter_pa_mpjpe_mm": metrics["methods"]["frozen_lifter"]["pa_mpjpe_mm"],
         "corrected_pa_mpjpe_mm": metrics["methods"]["perspective_corrected"]["pa_mpjpe_mm"],
         "metrics_path": str(out_dir / "metrics.json"),

@@ -128,7 +128,9 @@ DEFAULT_CONFIG = {
 
     "corrector_output": {
         "mode": "residual",
-        "base": "y_lifted"
+        "base": "y_lifted",
+        "gate_init_y_weight": 0.8,
+        "gate_mode": "joint_scalar"
     },
 
     "model": {

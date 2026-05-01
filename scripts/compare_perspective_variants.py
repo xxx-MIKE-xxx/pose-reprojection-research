@@ -24,6 +24,12 @@ def load_row(path):
         "test_sequences": data.get("num_test_sequences", ""),
         "correction_mode": data.get("correction_mode", "residual"),
         "corrector_output_base": data.get("corrector_output_base", "y_lifted"),
+        "gate_mode": data.get("gate_mode", ""),
+        "gate_init_y_weight": data.get("gate_init_y_weight", ""),
+        "mean_gate_y_weight": data.get("mean_gate_y_weight", ""),
+        "std_gate_y_weight": data.get("std_gate_y_weight", ""),
+        "min_gate_y_weight": data.get("min_gate_y_weight", ""),
+        "max_gate_y_weight": data.get("max_gate_y_weight", ""),
         "normalization_enabled": bool(data.get("corrector_normalization", {}).get("enabled", False)),
         "camera_feature_mode": data.get("camera_feature_mode", "raw_9d"),
         "z_ablation": data.get("z_ablation", "true"),
@@ -55,9 +61,11 @@ def load_row(path):
         "frozen_reprojection_clean_px": frozen.get("reprojection_error_to_clean_px", ""),
         "xgeo_reprojection_clean_px": xgeo.get("reprojection_error_to_clean_px", ""),
         "corrected_reprojection_clean_px": corr.get("reprojection_error_to_clean_px", ""),
+        "corrected_reprojection_error_to_clean_px": corr.get("reprojection_error_to_clean_px", ""),
         "frozen_accel_mm_frame2": frozen["accel_error_mm_per_frame2"],
         "xgeo_accel_mm_frame2": xgeo.get("accel_error_mm_per_frame2", ""),
         "corrected_accel_mm_frame2": corr["accel_error_mm_per_frame2"],
+        "corrected_accel_error_mm_per_frame2": corr["accel_error_mm_per_frame2"],
     }
 
 
