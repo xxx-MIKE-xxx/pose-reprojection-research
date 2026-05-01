@@ -1,0 +1,33 @@
+{
+  "experiment_name": "perspective_v2_px08_C_shuffledz_residual",
+  "seed": 1234,
+  "output_dir": "outputs/poc/perspective_v2_px08_C_shuffledz_residual",
+  "dataset": {
+    "reuse_synthetic_dataset": "outputs/poc/perspective_v2_fixed_px08_dataset/synthetic_dataset.npz"
+  },
+  "corrector_inputs": {
+    "use_lifter_3d": true,
+    "use_lifter_2d_normalized": true,
+    "use_raw_2d_metadata": true,
+    "use_camera_parameters": true,
+    "camera_feature_mode": "normalized_6d",
+    "z_ablation": "shuffle"
+  },
+  "corrector_normalization": {
+    "enabled": true,
+    "root_joint": 0,
+    "scale_mode": "stable_bones",
+    "eps": 0.000001
+  },
+  "corrector_output": {
+    "mode": "residual"
+  },
+  "lifter": {
+    "batch_size": 4
+  },
+  "training": {
+    "epochs": 50,
+    "batch_size": 8,
+    "patience": 12
+  }
+}

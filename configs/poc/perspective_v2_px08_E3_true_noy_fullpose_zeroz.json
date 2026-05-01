@@ -1,0 +1,33 @@
+{
+  "experiment_name": "perspective_v2_px08_E3_true_noy_fullpose_zeroz",
+  "seed": 1234,
+  "output_dir": "outputs/poc/perspective_v2_px08_E3_true_noy_fullpose_zeroz",
+  "dataset": {
+    "reuse_synthetic_dataset": "outputs/poc/perspective_v2_fixed_px08_dataset/synthetic_dataset.npz"
+  },
+  "corrector_inputs": {
+    "use_lifter_3d": false,
+    "use_lifter_2d_normalized": true,
+    "use_raw_2d_metadata": true,
+    "use_camera_parameters": true,
+    "camera_feature_mode": "normalized_6d",
+    "z_ablation": "zero"
+  },
+  "corrector_normalization": {
+    "enabled": false,
+    "root_joint": 0,
+    "scale_mode": "stable_bones",
+    "eps": 1e-06
+  },
+  "corrector_output": {
+    "mode": "full_pose"
+  },
+  "lifter": {
+    "batch_size": 4
+  },
+  "training": {
+    "epochs": 50,
+    "batch_size": 8,
+    "patience": 12
+  }
+}
