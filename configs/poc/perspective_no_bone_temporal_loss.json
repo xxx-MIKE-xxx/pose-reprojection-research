@@ -1,0 +1,11 @@
+{
+  "experiment_name": "perspective_no_bone_temporal_loss",
+  "seed": 1234,
+  "output_dir": "outputs/poc/perspective_no_bone_temporal_loss",
+  "losses": {
+    "mpjpe": {"weight": 1.0},
+    "reprojection": {"weight": 0.05, "unit": "normalized_image"},
+    "bone": {"weight": 0.0},
+    "temporal": {"weight": 0.0, "mode": "match_gt_accel"}
+  }
+}

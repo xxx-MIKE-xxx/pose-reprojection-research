@@ -1,0 +1,11 @@
+{
+  "experiment_name": "perspective_no_reprojection_loss",
+  "seed": 1234,
+  "output_dir": "outputs/poc/perspective_no_reprojection_loss",
+  "losses": {
+    "mpjpe": {"weight": 1.0},
+    "reprojection": {"weight": 0.0, "unit": "normalized_image"},
+    "bone": {"weight": 0.05},
+    "temporal": {"weight": 0.01, "mode": "match_gt_accel"}
+  }
+}

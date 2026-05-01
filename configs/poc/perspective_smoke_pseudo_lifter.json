@@ -1,0 +1,21 @@
+{
+  "experiment_name": "perspective_smoke_pseudo_lifter",
+  "seed": 1234,
+  "output_dir": "outputs/poc/perspective_smoke_pseudo_lifter",
+  "synthetic": {
+    "num_virtual_cameras": 8
+  },
+  "dataset": {
+    "max_frames": 32
+  },
+  "lifter": {
+    "type": "pseudo",
+    "alignment": "none",
+    "pseudo_bias_strength": 0.25
+  },
+  "training": {
+    "epochs": 5,
+    "batch_size": 2,
+    "patience": 5
+  }
+}

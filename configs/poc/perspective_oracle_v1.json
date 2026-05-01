@@ -1,0 +1,28 @@
+{
+  "experiment_name": "perspective_oracle_v1",
+  "seed": 1234,
+  "output_dir": "outputs/poc/perspective_oracle_v1",
+  "synthetic": {
+    "num_virtual_cameras": 48,
+    "camera_ranges": {
+      "distance_m": [2.0, 8.0],
+      "height_m": [-0.7, 1.8],
+      "yaw_deg": [-55.0, 55.0],
+      "pitch_deg": [-35.0, 35.0],
+      "roll_deg": [-8.0, 8.0],
+      "fov_deg": [35.0, 85.0]
+    }
+  },
+  "corrector_inputs": {
+    "use_lifter_3d": true,
+    "use_lifter_2d_normalized": true,
+    "use_raw_2d_metadata": true,
+    "use_camera_parameters": true
+  },
+  "losses": {
+    "mpjpe": {"weight": 1.0},
+    "reprojection": {"weight": 0.05, "unit": "normalized_image"},
+    "bone": {"weight": 0.05},
+    "temporal": {"weight": 0.01, "mode": "match_gt_accel"}
+  }
+}

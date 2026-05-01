@@ -1,0 +1,11 @@
+{
+  "experiment_name": "perspective_no_camera_ablation",
+  "seed": 1234,
+  "output_dir": "outputs/poc/perspective_no_camera_ablation",
+  "corrector_inputs": {
+    "use_lifter_3d": true,
+    "use_lifter_2d_normalized": true,
+    "use_raw_2d_metadata": true,
+    "use_camera_parameters": false
+  }
+}
