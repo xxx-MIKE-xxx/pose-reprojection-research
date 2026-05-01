@@ -88,8 +88,10 @@ DEFAULT_CONFIG = {
         "camera_feature_mode": "raw_9d",
         "z_ablation": "true",
         "use_ray_features": False,
+        "use_rays": False,
         "ray_ablation": "true",
-        "use_geometry_fit_3d": False
+        "use_geometry_fit_3d": False,
+        "use_reliability_features": False
     },
 
     "geometry_features": {
@@ -117,7 +119,9 @@ DEFAULT_CONFIG = {
             "depth_smooth": 0.001
         },
         "cache": True,
-        "xgeo_ablation": "none"
+        "xgeo_ablation": "none",
+        "xgeo_fit_mode": "free_depth",
+        "allow_unframed_closest_y": False
     },
 
     "corrector_normalization": {
@@ -132,6 +136,14 @@ DEFAULT_CONFIG = {
         "base": "y_lifted",
         "gate_init_y_weight": 0.8,
         "gate_mode": "joint_scalar"
+    },
+
+    "gate_regularization": {
+        "enabled": False,
+        "smoothness_weight": 0.0,
+        "entropy_weight": 0.0,
+        "mean_gate_prior": None,
+        "mean_gate_prior_weight": 0.0
     },
 
     "model": {

@@ -162,7 +162,7 @@ def prepare_ray_features(arrays, config):
     inputs = config.get("corrector_inputs", {})
     geom = config.get("geometry_features", {})
 
-    if not bool(inputs.get("use_ray_features", False)):
+    if not (bool(inputs.get("use_ray_features", False)) or bool(inputs.get("use_rays", False))):
         arrays["ray_features"] = np.zeros((arrays["x_gt"].shape[0], arrays["x_gt"].shape[1], 0), dtype=np.float32)
         arrays["ray_feature_info_json"] = np.array(json.dumps({
             "use_ray_features": False,

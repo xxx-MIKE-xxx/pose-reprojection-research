@@ -22,7 +22,7 @@ class CameraSequenceDataset(Dataset):
     def __getitem__(self, i):
         idx = int(self.indices[i])
         keys = ["x_gt", "u_px", "u_norm", "raw_2d_metadata", "z", "z_features", "y_lifted"]
-        for optional in ["ray_features", "x_geo", "x_geo_used"]:
+        for optional in ["ray_features", "x_geo", "x_geo_used", "reliability_features"]:
             if optional in self.arrays:
                 keys.append(optional)
         return {k: self.arrays[k][idx].astype(np.float32) for k in keys}
@@ -42,6 +42,46 @@ def _x_geo_used(batch):
     return batch.get("x_geo_used", batch.get("x_geo"))
 
 
+def _gate_tensor(model_output):
+    if isinstance(model_output, dict):
+        return model_output.get("gate")
+    return None
+
+
+def _apply_gate_regularization(losses, model_output, config):
+    reg_cfg = config.get("gate_regularization", {})
+    if not bool(reg_cfg.get("enabled", False)):
+        return losses
+    gate = _gate_tensor(model_output)
+    if gate is None:
+        return losses
+
+    total = losses["total"]
+    smooth_w = float(reg_cfg.get("smoothness_weight", 0.0))
+    if smooth_w and gate.shape[1] >= 2:
+        val = torch.mean((gate[:, 1:] - gate[:, :-1]) ** 2)
+        losses["gate_smoothness"] = val
+        total = total + smooth_w * val
+
+    entropy_w = float(reg_cfg.get("entropy_weight", 0.0))
+    if entropy_w:
+        g = gate.clamp(1e-6, 1.0 - 1e-6)
+        val = -(g * torch.log(g) + (1.0 - g) * torch.log(1.0 - g)).mean()
+        losses["gate_entropy"] = val
+        total = total + entropy_w * val
+
+    prior = reg_cfg.get("mean_gate_prior", None)
+    prior_w = float(reg_cfg.get("mean_gate_prior_weight", 0.0))
+    if prior is not None and prior_w:
+        target = gate.new_tensor(float(prior))
+        val = (gate.mean() - target) ** 2
+        losses["gate_mean_prior"] = val
+        total = total + prior_w * val
+
+    losses["total"] = total
+    return losses
+
+
 def evaluate_epoch(model, loader, config, device):
     model.eval()
     sums = {}
@@ -58,10 +98,12 @@ def evaluate_epoch(model, loader, config, device):
                 config["corrector_inputs"],
                 ray_features=batch.get("ray_features"),
                 x_geo_features=corrector_pose_input(x_geo_used, config) if x_geo_used is not None else None,
+                reliability_features=batch.get("reliability_features"),
             )
             model_output = model(features)
             x_hat = compose_prediction(batch["y_lifted"], model_output, config, x_geo=x_geo_used)
             losses = compute_losses(x_hat, batch["x_gt"], batch["u_px"], batch["z"], config["losses"])
+            losses = _apply_gate_regularization(losses, model_output, config)
             bs = batch["x_gt"].shape[0]
             for k, v in losses.items():
                 sums[k] = sums.get(k, 0.0) + float(v.detach().cpu()) * bs
@@ -140,11 +182,13 @@ def train_corrector(arrays, config, out_dir):
                 config["corrector_inputs"],
                 ray_features=batch.get("ray_features"),
                 x_geo_features=corrector_pose_input(x_geo_used, config) if x_geo_used is not None else None,
+                reliability_features=batch.get("reliability_features"),
             )
             model_output = model(features)
             x_hat = compose_prediction(batch["y_lifted"], model_output, config, x_geo=x_geo_used)
 
             losses = compute_losses(x_hat, batch["x_gt"], batch["u_px"], batch["z"], config["losses"])
+            losses = _apply_gate_regularization(losses, model_output, config)
             opt.zero_grad(set_to_none=True)
             losses["total"].backward()
             if grad_clip:

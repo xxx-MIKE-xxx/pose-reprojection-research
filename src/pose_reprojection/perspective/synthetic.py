@@ -110,6 +110,9 @@ def generate_synthetic_dataset(config, sources):
     meta_list = []
     meta_clean_list = []
     z_list = []
+    camera_R_list = []
+    camera_K_list = []
+    camera_t_list = []
     camera_records = []
     source_names = []
     source_subjects = []
@@ -146,7 +149,7 @@ def generate_synthetic_dataset(config, sources):
                 image_width=image_width,
                 image_height=image_height,
             )
-            u_px_clean, _ = project_np(x, params)
+            u_px_clean, _, camera_info = project_np(x, params, return_camera=True)
             u_norm_clean = normalize_screen_coordinates_np(u_px_clean, image_width, image_height)
             meta_clean = raw_2d_metadata(u_px_clean, image_width, image_height)
 
@@ -166,6 +169,9 @@ def generate_synthetic_dataset(config, sources):
             meta_list.append(meta.astype(np.float32))
             meta_clean_list.append(meta_clean.astype(np.float32))
             z_list.append(z_vec.astype(np.float32))
+            camera_R_list.append(camera_info["R_world_to_camera"].astype(np.float32))
+            camera_K_list.append(camera_info["K"].astype(np.float32))
+            camera_t_list.append(camera_info["t_world_to_camera"].astype(np.float32))
             canonical_2d_list.append(canonical_2d.astype(np.float32))
             source_names.append(source["name"])
             source_subjects.append(subject)
@@ -189,6 +195,9 @@ def generate_synthetic_dataset(config, sources):
         "u_norm_clean": np.stack(u_norm_clean_list, axis=0).astype(np.float32),
         "raw_2d_metadata_clean": np.stack(meta_clean_list, axis=0).astype(np.float32),
         "z": np.stack(z_list, axis=0).astype(np.float32),
+        "camera_R_world_to_camera": np.stack(camera_R_list, axis=0).astype(np.float32),
+        "camera_K": np.stack(camera_K_list, axis=0).astype(np.float32),
+        "camera_t_world_to_camera": np.stack(camera_t_list, axis=0).astype(np.float32),
         "canonical_2d_px": np.stack(canonical_2d_list, axis=0).astype(np.float32),
         "frame_indices": np.stack(frame_indices_list, axis=0).astype(np.int32),
         "source_names": np.array(source_names),

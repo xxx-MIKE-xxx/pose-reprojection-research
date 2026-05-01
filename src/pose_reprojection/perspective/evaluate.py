@@ -47,6 +47,9 @@ def predict_corrected(model, arrays, config, indices=None, device=None, return_a
             ray_features = None
             if "ray_features" in arrays:
                 ray_features = torch.from_numpy(arrays["ray_features"][idx:idx + 1]).float().to(device)
+            reliability_features = None
+            if "reliability_features" in arrays:
+                reliability_features = torch.from_numpy(arrays["reliability_features"][idx:idx + 1]).float().to(device)
             x_geo = None
             x_geo_features = None
             x_geo_key = "x_geo_used" if "x_geo_used" in arrays else "x_geo"
@@ -61,6 +64,7 @@ def predict_corrected(model, arrays, config, indices=None, device=None, return_a
                 config["corrector_inputs"],
                 ray_features=ray_features,
                 x_geo_features=x_geo_features,
+                reliability_features=reliability_features,
             )
             model_output = model(feat)
             x_hat = compose_prediction(y, model_output, config, x_geo=x_geo)
@@ -75,6 +79,8 @@ def predict_corrected(model, arrays, config, indices=None, device=None, return_a
     if gate_outs:
         aux["gate_y_weight"] = np.stack(gate_outs, axis=0).astype(np.float32)
         aux["gate_stats"] = _gate_stats(aux["gate_y_weight"])
+        gate = aux["gate_y_weight"]
+        aux["gate_y_weight_by_joint"] = gate.mean(axis=(0, 1, 3)).astype(np.float32)
     return x_hat, aux
 
 
@@ -121,6 +127,10 @@ def evaluate_and_save(model, arrays, config, out_dir):
         methods["x_geo_used"] = summarize_method(x_geo_used, gt, u_px, z, pck_threshold=pck_thr, u_px_clean=u_px_clean)
         buckets["x_geo_used"] = summarize_buckets(x_geo_used, gt, z, config["evaluation"]["bucket_thresholds"])
 
+    if config.get("corrector_output", {}).get("mode") == "gate_only":
+        methods["x_base"] = methods["perspective_corrected"]
+        buckets["x_base"] = buckets["perspective_corrected"]
+
     ray_info = {}
     if "ray_feature_info_json" in arrays:
         ray_info = json.loads(str(arrays["ray_feature_info_json"]))
@@ -154,7 +164,10 @@ def evaluate_and_save(model, arrays, config, out_dir):
         "corrector_normalization": config.get("corrector_normalization", {"enabled": False}),
         "camera_feature_mode": config.get("corrector_inputs", {}).get("camera_feature_mode", "raw_9d"),
         "z_ablation": config.get("corrector_inputs", {}).get("z_ablation", "true"),
-        "use_ray_features": bool(config.get("corrector_inputs", {}).get("use_ray_features", False)),
+        "use_ray_features": (
+            bool(config.get("corrector_inputs", {}).get("use_ray_features", False))
+            or bool(config.get("corrector_inputs", {}).get("use_rays", False))
+        ),
         "ray_ablation": config.get("corrector_inputs", {}).get("ray_ablation", "true"),
         "ray_feature_info": ray_info,
         "ray_feature_mode": config.get("geometry_features", {}).get("ray_feature_mode", "unit_rays"),
@@ -163,12 +176,19 @@ def evaluate_and_save(model, arrays, config, out_dir):
         "geometry_checks": geometry_checks,
         "geometry_refinement": config.get("geometry_refinement", {"enabled": False}),
         "geometry_refinement_mode": config.get("geometry_refinement", {}).get("mode", "ray_depth_fit"),
+        "xgeo_fit_mode": config.get("geometry_refinement", {}).get("xgeo_fit_mode", "free_depth"),
         "xgeo_ablation": xgeo_ablation_info.get("xgeo_ablation", "none"),
         "xgeo_ablation_applied": bool(xgeo_ablation_info.get("xgeo_ablation_applied", False)),
         "xgeo_ablation_source": xgeo_ablation_info.get("xgeo_ablation_source", "true_x_geo"),
         "xgeo_ablation_info": xgeo_ablation_info,
         "use_geometry_fit_3d": bool(config.get("corrector_inputs", {}).get("use_geometry_fit_3d", False)),
+        "use_reliability_features": bool(config.get("corrector_inputs", {}).get("use_reliability_features", False)),
+        "reliability_feature_info": (
+            json.loads(str(arrays["reliability_feature_info_json"]))
+            if "reliability_feature_info_json" in arrays else {}
+        ),
         "x_geo_fit_stats": x_geo_fit_stats,
+        "xgeo_frame_mode": x_geo_fit_stats.get("xgeo_frame_mode"),
         "dataset_hash": config.get("dataset_hash"),
         "dataset_source": config.get("dataset_source"),
         "split_subjects": config.get("split_subjects"),
@@ -181,6 +201,24 @@ def evaluate_and_save(model, arrays, config, out_dir):
 
     if pred_aux.get("gate_stats"):
         metrics.update(pred_aux["gate_stats"])
+    if pred_aux.get("gate_y_weight_by_joint") is not None:
+        metrics["gate_y_weight_by_joint"] = {
+            name: float(pred_aux["gate_y_weight_by_joint"][i])
+            for i, name in enumerate(H36M17_NAMES)
+        }
+
+    metrics.update({
+        "frozen_lifter_mpjpe_mm": methods["frozen_lifter"].get("mpjpe_mm"),
+        "frozen_lifter_pa_mpjpe_mm": methods["frozen_lifter"].get("pa_mpjpe_mm"),
+        "frozen_lifter_pck150": methods["frozen_lifter"].get("pck150"),
+        "y_mpjpe_mm": methods["frozen_lifter"].get("mpjpe_mm"),
+        "y_pa_mpjpe_mm": methods["frozen_lifter"].get("pa_mpjpe_mm"),
+        "y_pck150": methods["frozen_lifter"].get("pck150"),
+        "corrected_mpjpe_mm": methods["perspective_corrected"].get("mpjpe_mm"),
+        "corrected_pa_mpjpe_mm": methods["perspective_corrected"].get("pa_mpjpe_mm"),
+        "corrected_pck150": methods["perspective_corrected"].get("pck150"),
+        "corrected_accel_error_mm_per_frame2": methods["perspective_corrected"].get("accel_error_mm_per_frame2"),
+    })
 
     if "x_geo_raw" in methods:
         geo = methods["x_geo_raw"]
@@ -208,6 +246,14 @@ def evaluate_and_save(model, arrays, config, out_dir):
             "xgeo_used_reprojection_error_to_input_px": geo.get("reprojection_error_to_input_px"),
             "xgeo_used_reprojection_error_to_clean_px": geo.get("reprojection_error_to_clean_px"),
             "xgeo_used_accel_error_mm_per_frame2": geo.get("accel_error_mm_per_frame2"),
+        })
+    if "x_base" in methods:
+        base = methods["x_base"]
+        metrics.update({
+            "xbase_mpjpe_mm": base.get("mpjpe_mm"),
+            "xbase_pa_mpjpe_mm": base.get("pa_mpjpe_mm"),
+            "xbase_pck150": base.get("pck150"),
+            "xbase_accel_error_mm_per_frame2": base.get("accel_error_mm_per_frame2"),
         })
 
     (out_dir / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
@@ -245,7 +291,10 @@ def evaluate_and_save(model, arrays, config, out_dir):
         x_hat=x_hat,
         x_geo=x_geo_raw if x_geo_raw is not None else np.array([], dtype=np.float32),
         x_geo_used=x_geo_used if x_geo_used is not None else np.array([], dtype=np.float32),
+        x_geo_camera_abs=arrays["x_geo_camera_abs"][test_idx] if "x_geo_camera_abs" in arrays else np.array([], dtype=np.float32),
+        x_geo_camera_rel=arrays["x_geo_camera_rel"][test_idx] if "x_geo_camera_rel" in arrays else np.array([], dtype=np.float32),
         gate_y_weight=pred_aux.get("gate_y_weight", np.array([], dtype=np.float32)),
+        reliability_features=arrays["reliability_features"][test_idx] if "reliability_features" in arrays else np.array([], dtype=np.float32),
         u_px=u_px,
         u_px_clean=u_px_clean if u_px_clean is not None else np.array([], dtype=np.float32),
         u_norm=arrays["u_norm"][test_idx],

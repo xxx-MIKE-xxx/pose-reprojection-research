@@ -63,7 +63,17 @@ def vector_to_camera_params(vec):
     return {name: float(vec[i]) for i, name in enumerate(CAMERA_PARAM_NAMES)}
 
 
-def project_np(x_world, params):
+def _intrinsics_from_params(params):
+    w = float(params["image_width"])
+    h = float(params["image_height"])
+    f = float(params["focal_px"])
+    return np.array(
+        [[f, 0.0, 0.5 * w], [0.0, f, 0.5 * h], [0.0, 0.0, 1.0]],
+        dtype=np.float32,
+    )
+
+
+def project_np(x_world, params, return_camera=False):
     """Project root-centered 3D skeletons to pixels.
 
     x_world: (..., 17, 3), meters.
@@ -75,9 +85,9 @@ def project_np(x_world, params):
     cam = flat @ R.T
     cam = cam.reshape(x.shape)
 
+    t = np.array([0.0, -float(params["height_m"]), float(params["distance_m"])], dtype=np.float32)
     cam = cam.copy()
-    cam[..., 1] -= float(params["height_m"])
-    cam[..., 2] += float(params["distance_m"])
+    cam += t
 
     z = np.maximum(cam[..., 2], 1e-3)
     w = float(params["image_width"])
@@ -85,7 +95,15 @@ def project_np(x_world, params):
     f = float(params["focal_px"])
     u = f * (cam[..., 0] / z) + 0.5 * w
     v = -f * (cam[..., 1] / z) + 0.5 * h
-    return np.stack([u, v], axis=-1).astype(np.float32), cam.astype(np.float32)
+    pixels = np.stack([u, v], axis=-1).astype(np.float32)
+    cam = cam.astype(np.float32)
+    if not return_camera:
+        return pixels, cam
+    return pixels, cam, {
+        "R_world_to_camera": R.astype(np.float32),
+        "K": _intrinsics_from_params(params),
+        "t_world_to_camera": t.astype(np.float32),
+    }
 
 
 def normalize_screen_coordinates_np(u, w, h):

@@ -23,9 +23,13 @@ from pose_reprojection.perspective.lifter import run_frozen_lifter
 from pose_reprojection.perspective.train import train_corrector
 from pose_reprojection.perspective.evaluate import evaluate_and_save
 from pose_reprojection.perspective.visualize import visualize_outputs
-from pose_reprojection.perspective.features import prepare_z_features, apply_xgeo_ablation
-from pose_reprojection.perspective.geometry import ensure_geometry_arrays, prepare_ray_features
-from pose_reprojection.perspective.ray_fit import fit_xgeo_from_rays_and_lifter
+from pose_reprojection.perspective.features import prepare_z_features, apply_xgeo_ablation, prepare_reliability_features
+from pose_reprojection.perspective.geometry import ensure_geometry_arrays, prepare_ray_features, camera_intrinsics_from_params
+from pose_reprojection.perspective.ray_fit import (
+    fit_xgeo_closest_to_lifter_frame_aware,
+    fit_xgeo_from_rays_and_lifter,
+    image_rays_to_camera_rays,
+)
 from pose_reprojection.perspective.reproducibility import seed_everything
 
 
@@ -99,6 +103,9 @@ def _write_dataset_manifest(out_dir, dataset_path, dataset_hash, arrays, reused)
             split: int(len(arrays[f"{split}_indices"])) for split in ["train", "val", "test"]
         },
         "split_subjects": _split_subject_summary(arrays),
+        "has_camera_R_world_to_camera": "camera_R_world_to_camera" in arrays,
+        "has_camera_K": "camera_K" in arrays,
+        "has_camera_t_world_to_camera": "camera_t_world_to_camera" in arrays,
     }
     (out_dir / "synthetic_dataset_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return manifest
@@ -149,9 +156,38 @@ def _write_xgeo_ablation_manifest(out_dir, arrays):
     return info
 
 
+def _write_reliability_feature_manifest(out_dir, arrays):
+    info = {}
+    if "reliability_feature_info_json" in arrays:
+        info = json.loads(str(arrays["reliability_feature_info_json"]))
+    if "reliability_features" in arrays:
+        info["reliability_features_shape"] = list(arrays["reliability_features"].shape)
+    (out_dir / "reliability_features_manifest.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
+    return info
+
+
 def _json_digest(obj):
     text = json.dumps(obj, sort_keys=True, default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _requires_frame_aware_closest_y(config):
+    refine_cfg = config.get("geometry_refinement", {})
+    return bool(refine_cfg.get("enabled", False)) and refine_cfg.get("xgeo_fit_mode") == "closest_y"
+
+
+def _validate_synthetic_camera_frame(arrays, config, dataset_path):
+    if not _requires_frame_aware_closest_y(config):
+        return
+    refine_cfg = config.get("geometry_refinement", {})
+    if "camera_R_world_to_camera" in arrays:
+        return
+    if bool(refine_cfg.get("allow_unframed_closest_y", False)):
+        return
+    raise RuntimeError(
+        "closest_y synthetic X_geo requires camera_R_world_to_camera. "
+        f"Regenerate the synthetic dataset with camera rotation matrices: {dataset_path}"
+    )
 
 
 def step_generate(config, out_dir, force=False):
@@ -165,6 +201,7 @@ def step_generate(config, out_dir, force=False):
         for key in ["train_indices", "val_indices", "test_indices"]:
             if key not in arrays:
                 raise KeyError(f"Reused synthetic dataset is missing {key}: {dataset_path}")
+        _validate_synthetic_camera_frame(arrays, config, dataset_path)
         dataset_hash = _sha256_file(dataset_path)
         split_subjects = _write_split_manifest(out_dir, arrays, camera_records)
         _write_dataset_manifest(out_dir, dataset_path, dataset_hash, arrays, reused=True)
@@ -177,6 +214,7 @@ def step_generate(config, out_dir, force=False):
     if dataset_path.exists() and not force:
         print("[generate] using existing:", dataset_path)
         arrays, camera_records = load_synthetic_dataset(dataset_path)
+        _validate_synthetic_camera_frame(arrays, config, dataset_path)
         dataset_hash = _sha256_file(dataset_path)
         split_subjects = _write_split_manifest(out_dir, arrays, camera_records)
         _write_dataset_manifest(out_dir, dataset_path, dataset_hash, arrays, reused=False)
@@ -255,7 +293,7 @@ def step_geometry_refinement(config, out_dir, arrays, force=False):
         arrays = ensure_geometry_arrays(arrays, config)
 
     cache_path = out_dir / "x_geo_outputs.npz"
-    cfg_hash = _json_digest(refine_cfg)
+    cfg_hash = _json_digest({"geometry_refinement": refine_cfg, "xgeo_algorithm_version": 2})
     dataset_hash = str(config.get("dataset_hash", ""))
     if bool(refine_cfg.get("cache", True)) and cache_path.exists() and not force:
         data = np.load(cache_path, allow_pickle=False)
@@ -263,6 +301,16 @@ def step_geometry_refinement(config, out_dir, arrays, force=False):
         cache_cfg_hash = str(data["geometry_config_hash"]) if "geometry_config_hash" in data else ""
         if cache_dataset_hash == dataset_hash and cache_cfg_hash == cfg_hash:
             arrays["x_geo"] = data["x_geo"].astype(np.float32)
+            if "x_geo_camera_abs" in data:
+                arrays["x_geo_camera_abs"] = data["x_geo_camera_abs"].astype(np.float32)
+            if "x_geo_camera_rel" in data:
+                arrays["x_geo_camera_rel"] = data["x_geo_camera_rel"].astype(np.float32)
+            if "xgeo_depths_mm" in data:
+                arrays["xgeo_depths_mm"] = data["xgeo_depths_mm"].astype(np.float32)
+            if "xgeo_depth_prior_mm" in data:
+                arrays["xgeo_depth_prior_mm"] = data["xgeo_depth_prior_mm"].astype(np.float32)
+            if "xgeo_fit_rmse_mm" in data:
+                arrays["xgeo_fit_rmse_mm"] = data["xgeo_fit_rmse_mm"].astype(np.float32)
             if "fit_stats_json" in data:
                 arrays["x_geo_fit_stats_json"] = np.array(str(data["fit_stats_json"]))
                 (out_dir / "x_geo_fit_stats.json").write_text(
@@ -274,14 +322,67 @@ def step_geometry_refinement(config, out_dir, arrays, force=False):
             _write_xgeo_ablation_manifest(out_dir, arrays)
             return arrays
 
-    print("[x_geo] fitting ray-depth geometry candidate")
-    x_geo, stats = fit_xgeo_from_rays_and_lifter(
-        arrays["y_lifted"],
-        arrays["rays_input"],
-        config,
-        camera_params=arrays["z"],
-        u_px=arrays["u_px"],
-    )
+    fit_mode = refine_cfg.get("xgeo_fit_mode", "free_depth")
+    print(f"[x_geo] fitting geometry candidate ({fit_mode})")
+    save_payload = {}
+    if fit_mode == "closest_y":
+        if "camera_R_world_to_camera" not in arrays and not bool(refine_cfg.get("allow_unframed_closest_y", False)):
+            raise RuntimeError(
+                "closest_y synthetic X_geo requires camera_R_world_to_camera. "
+                "Regenerate the synthetic dataset with camera rotation matrices."
+            )
+        n, t, j, c = arrays["y_lifted"].shape
+        K = arrays["camera_K"].astype(np.float32) if "camera_K" in arrays else camera_intrinsics_from_params(arrays["z"])
+        K_frames = np.repeat(K[:, None], t, axis=1).reshape(n * t, 3, 3)
+        R = arrays.get("camera_R_world_to_camera")
+        R_frames = None
+        if R is not None:
+            R_frames = np.repeat(R[:, None], t, axis=1).reshape(n * t, 3, 3)
+        rays_camera = image_rays_to_camera_rays(arrays["rays_input"].reshape(n * t, j, c))
+        fit = fit_xgeo_closest_to_lifter_frame_aware(
+            rays_camera,
+            (arrays["y_lifted"].reshape(n * t, j, c) * 1000.0).astype(np.float32),
+            root_idx=int(refine_cfg.get("root_joint", 0)),
+            camera_R_world_to_camera=R_frames,
+            u_px=arrays["u_px"].reshape(n * t, j, 2),
+            intrinsics=K_frames,
+            depth_prior_mode=refine_cfg.get("xgeo_depth_prior_mode", "bbox"),
+            root_prior_weight=float(refine_cfg.get("xgeo_root_prior_weight", 1.0)),
+            depth_ridge_weight=float(refine_cfg.get("xgeo_depth_ridge_weight", 0.01)),
+            min_depth_mm=float(refine_cfg.get("xgeo_min_depth_mm", 500.0)),
+            max_depth_mm=float(refine_cfg.get("xgeo_max_depth_mm", 10000.0)),
+        )
+        arrays["x_geo_camera_abs"] = (fit["x_geo_camera_abs_mm"].reshape(n, t, j, c) / 1000.0).astype(np.float32)
+        arrays["x_geo_camera_rel"] = (fit["x_geo_camera_rel_mm"].reshape(n, t, j, c) / 1000.0).astype(np.float32)
+        x_geo = (fit["x_geo_used_mm"].reshape(n, t, j, c) / 1000.0).astype(np.float32)
+        arrays["xgeo_depths_mm"] = fit["depths_mm"].reshape(n, t, j).astype(np.float32)
+        arrays["xgeo_depth_prior_mm"] = fit["depth_prior_mm"].reshape(n, t).astype(np.float32)
+        arrays["xgeo_fit_rmse_mm"] = fit["fit_rmse_mm"].reshape(n, t).astype(np.float32)
+        stats = dict(fit["stats"])
+        stats["xgeo_fit_mode"] = "closest_y"
+        stats["xgeo_frame_mode"] = stats.get("xgeo_frame_mode", "world_to_camera_to_world")
+        stats["coordinate_mode"] = "root_aligned_to_y"
+        stats["mean_reprojection_error_to_input_px"] = None
+        save_payload.update({
+            "x_geo_camera_abs": arrays["x_geo_camera_abs"],
+            "x_geo_camera_rel": arrays["x_geo_camera_rel"],
+            "xgeo_depths_mm": arrays["xgeo_depths_mm"],
+            "xgeo_depth_prior_mm": arrays["xgeo_depth_prior_mm"],
+            "xgeo_fit_rmse_mm": arrays["xgeo_fit_rmse_mm"],
+        })
+    elif fit_mode == "free_depth":
+        x_geo, stats = fit_xgeo_from_rays_and_lifter(
+            arrays["y_lifted"],
+            arrays["rays_input"],
+            config,
+            camera_params=arrays["z"],
+            u_px=arrays["u_px"],
+        )
+        stats["xgeo_fit_mode"] = "free_depth"
+        stats["xgeo_frame_mode"] = "camera_depth_to_world"
+        stats["coordinate_mode"] = "synthetic_world_from_camera_depth"
+    else:
+        raise ValueError(f"Unknown geometry_refinement.xgeo_fit_mode: {fit_mode}")
     reproj = stats.get("mean_reprojection_error_to_input_px")
     max_reproj = float(refine_cfg.get("max_reprojection_error_to_input_px", 2.0))
     if reproj is not None and float(reproj) > max_reproj:
@@ -296,6 +397,7 @@ def step_geometry_refinement(config, out_dir, arrays, force=False):
     np.savez_compressed(
         cache_path,
         x_geo=arrays["x_geo"],
+        **save_payload,
         dataset_hash=np.array(dataset_hash),
         geometry_config_hash=np.array(cfg_hash),
         fit_stats_json=arrays["x_geo_fit_stats_json"],
@@ -342,6 +444,8 @@ def run_all(args):
         config["x_geo_fit_stats"] = json.loads(str(arrays["x_geo_fit_stats_json"]))
     if "xgeo_ablation_info_json" in arrays:
         config["xgeo_ablation_info"] = json.loads(str(arrays["xgeo_ablation_info_json"]))
+    arrays = prepare_reliability_features(arrays, config)
+    config["reliability_feature_info"] = _write_reliability_feature_manifest(out_dir, arrays)
     save_config(config, out_dir / "resolved_config.json")
 
     model, _ = train_corrector(arrays, config, out_dir)

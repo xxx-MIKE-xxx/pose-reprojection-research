@@ -50,6 +50,10 @@ def main():
             f"min `{data.get('min_gate_y_weight'):.4f}`, "
             f"max `{data.get('max_gate_y_weight'):.4f}`"
         )
+    if data.get("gate_y_weight_by_joint"):
+        gate_joint = data.get("gate_y_weight_by_joint")
+        compact_gate = ", ".join(f"{name}={value:.3f}" for name, value in gate_joint.items())
+        lines.append(f"Gate Y weight by joint: `{compact_gate}`")
     norm = data.get("corrector_normalization", {})
     lines.append(f"Corrector normalization: `{bool(norm.get('enabled', False))}`")
     lines.append(f"Camera feature mode: `{data.get('camera_feature_mode', 'raw_9d')}`")
@@ -61,6 +65,8 @@ def main():
     geom_ref = data.get("geometry_refinement", {})
     lines.append(f"Geometry refinement: `{bool(geom_ref.get('enabled', False))}`")
     lines.append(f"Geometry refinement mode: `{data.get('geometry_refinement_mode', geom_ref.get('mode', 'ray_depth_fit'))}`")
+    lines.append(f"X_geo fit mode: `{data.get('xgeo_fit_mode', geom_ref.get('xgeo_fit_mode', 'free_depth'))}`")
+    lines.append(f"X_geo frame mode: `{data.get('xgeo_frame_mode')}`")
     lines.append(f"X_geo ablation: `{data.get('xgeo_ablation', 'none')}`")
     lines.append(f"X_geo ablation applied: `{bool(data.get('xgeo_ablation_applied', False))}`")
     lines.append(f"X_geo used source: `{data.get('xgeo_ablation_source', 'true_x_geo')}`")
@@ -68,6 +74,10 @@ def main():
         lines.append(f"Raw X_geo MPJPE: `{data.get('xgeo_raw_mpjpe_mm'):.4f} mm`")
     if data.get("xgeo_used_mpjpe_mm") is not None:
         lines.append(f"Pc-used X_geo MPJPE: `{data.get('xgeo_used_mpjpe_mm'):.4f} mm`")
+    if data.get("xbase_mpjpe_mm") is not None:
+        lines.append(f"Gate/base MPJPE: `{data.get('xbase_mpjpe_mm'):.4f} mm`")
+    if data.get("reliability_feature_info", {}).get("feature_dim") is not None:
+        lines.append(f"Reliability feature dim: `{data.get('reliability_feature_info', {}).get('feature_dim')}`")
     if data.get("dataset_hash"):
         lines.append(f"Dataset SHA256: `{data.get('dataset_hash')}`")
     if data.get("split_subjects"):

@@ -1,0 +1,47 @@
+{
+  "experiment_name": "perspective_official_mpi3dhp_gt2d_h_noz",
+  "seed": 1234,
+  "output_dir": "outputs/official_mpi3dhp/eval_gt2d_h_noz",
+  "official_eval": true,
+  "input_2d_source": "gt2d_official",
+  "dataset": {
+    "official_gt2d_npz": "outputs/official_mpi3dhp/official_test_gt2d.npz",
+    "reuse_synthetic_dataset": null
+  },
+  "lifter": {
+    "type": "videopose3d",
+    "checkpoint": "checkpoints/videopose3d/pretrained_h36m_cpn.bin",
+    "third_party_root": "third_party/VideoPose3D",
+    "pad": 121,
+    "normalize_screen_coordinates": true,
+    "batch_size": 1,
+    "device": "auto",
+    "alignment": "none"
+  },
+  "corrector_inputs": {
+    "use_lifter_3d": true,
+    "use_lifter_2d_normalized": true,
+    "use_raw_2d_metadata": true,
+    "use_camera_parameters": false,
+    "use_ray_features": false,
+    "use_geometry_fit_3d": false
+  },
+  "corrector_output": {
+    "mode": "residual",
+    "base": "y_lifted"
+  },
+  "corrector_normalization": {
+    "enabled": true,
+    "root_joint": 0,
+    "scale_mode": "stable_bones",
+    "eps": 0.000001
+  },
+  "training": {
+    "epochs": 0,
+    "batch_size": 8,
+    "device": "auto"
+  },
+  "visualization": {
+    "enabled": false
+  }
+}

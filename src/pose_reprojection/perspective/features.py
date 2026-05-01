@@ -124,6 +124,97 @@ def corrector_y_input(y_lifted, config):
     return corrector_pose_input(y_lifted, config)
 
 
+def _bone_lengths_np(x):
+    vals = []
+    for a, b in STABLE_SCALE_BONES:
+        vals.append(np.linalg.norm(x[..., a, :] - x[..., b, :], axis=-1))
+    return np.stack(vals, axis=-1)
+
+
+def prepare_reliability_features(arrays, config):
+    inputs = config.get("corrector_inputs", {})
+    if not bool(inputs.get("use_reliability_features", False)):
+        n, t = arrays["y_lifted"].shape[:2]
+        arrays["reliability_features"] = np.zeros((n, t, 0), dtype=np.float32)
+        arrays["reliability_feature_info_json"] = np.array(json.dumps({
+            "use_reliability_features": False,
+            "feature_dim": 0,
+            "features": [],
+        }))
+        return arrays
+
+    y = np.asarray(arrays["y_lifted"], dtype=np.float32)
+    x_geo = arrays.get("x_geo_used", arrays.get("x_geo"))
+    if x_geo is None:
+        n, t = y.shape[:2]
+        arrays["reliability_features"] = np.zeros((n, t, 0), dtype=np.float32)
+        arrays["reliability_feature_info_json"] = np.array(json.dumps({
+            "use_reliability_features": True,
+            "feature_dim": 0,
+            "features": [],
+            "missing": "x_geo_used",
+        }))
+        return arrays
+
+    x_geo = np.asarray(x_geo, dtype=np.float32)
+    if x_geo.shape != y.shape:
+        raise ValueError(f"Reliability features require x_geo shape {x_geo.shape} to match y_lifted {y.shape}")
+
+    parts = []
+    names = []
+
+    joint_delta_m = np.linalg.norm(y - x_geo, axis=-1).astype(np.float32)
+    parts.append(joint_delta_m)
+    names.extend([f"joint_delta_m_{i}" for i in range(joint_delta_m.shape[-1])])
+
+    raw_meta = arrays.get("raw_2d_metadata")
+    if raw_meta is not None:
+        raw_meta = np.asarray(raw_meta, dtype=np.float32)
+    if raw_meta is not None and raw_meta.ndim == 3 and raw_meta.shape[:2] == y.shape[:2] and raw_meta.shape[-1] >= 5:
+        bbox_height = raw_meta[..., 3:4]
+        bbox_area = raw_meta[..., 4:5]
+        center_dist = np.linalg.norm(raw_meta[..., 0:2] - 0.5, axis=-1, keepdims=True).astype(np.float32)
+    else:
+        bbox_height = np.zeros(y.shape[:2] + (1,), dtype=np.float32)
+        bbox_area = np.zeros_like(bbox_height)
+        center_dist = np.zeros_like(bbox_height)
+    parts.extend([bbox_height, bbox_area, center_dist])
+    names.extend(["bbox_height_norm", "bbox_area_norm", "bbox_center_distance_norm"])
+
+    rmse = arrays.get("xgeo_fit_rmse_mm")
+    rmse_m = np.zeros(y.shape[:2] + (1,), dtype=np.float32)
+    if rmse is not None:
+        rmse_arr = np.asarray(rmse, dtype=np.float32)
+        if rmse_arr.shape[:2] == y.shape[:2]:
+            rmse_m = rmse_arr[..., None] / 1000.0
+    parts.append(rmse_m)
+    names.append("xgeo_fit_rmse_m")
+
+    y_bones = _bone_lengths_np(y)
+    xg_bones = _bone_lengths_np(x_geo)
+    bone_diff = np.abs(y_bones - xg_bones).mean(axis=-1, keepdims=True).astype(np.float32)
+    parts.append(bone_diff)
+    names.append("stable_bone_mean_abs_diff_m")
+
+    depth_prior = arrays.get("xgeo_depth_prior_mm")
+    depth_prior_norm = np.zeros(y.shape[:2] + (1,), dtype=np.float32)
+    if depth_prior is not None:
+        depth_prior_arr = np.asarray(depth_prior, dtype=np.float32)
+        if depth_prior_arr.shape[:2] == y.shape[:2]:
+            depth_prior_norm = depth_prior_arr[..., None] / 10000.0
+    parts.append(depth_prior_norm)
+    names.append("xgeo_depth_prior_10m")
+
+    features = np.concatenate(parts, axis=-1).astype(np.float32) if parts else np.zeros(y.shape[:2] + (0,), dtype=np.float32)
+    arrays["reliability_features"] = features
+    arrays["reliability_feature_info_json"] = np.array(json.dumps({
+        "use_reliability_features": True,
+        "feature_dim": int(features.shape[-1]),
+        "features": names,
+    }))
+    return arrays
+
+
 def apply_xgeo_ablation(arrays, config):
     """Create arrays['x_geo_used'] for Pc inputs and residual bases.
 
@@ -209,6 +300,11 @@ def compose_prediction(y_lifted, model_output, config, x_geo=None):
     norm_cfg = config.get("corrector_normalization", {})
     normalization_enabled = bool(norm_cfg.get("enabled", False))
     residual, gate = _split_model_output(model_output)
+
+    if mode == "gate_only":
+        if output_cfg.get("base", "gated_y_xgeo") != "gated_y_xgeo":
+            raise ValueError("corrector_output.mode='gate_only' requires base='gated_y_xgeo'")
+        return _residual_base_pose_with_gate(y_lifted, x_geo, config, gate)
 
     if normalization_enabled:
         if mode != "residual":

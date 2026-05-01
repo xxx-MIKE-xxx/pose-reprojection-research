@@ -35,10 +35,16 @@ class ResidualMLP(nn.Module):
 
         self.num_joints = int(num_joints)
         output_cfg = output_cfg or {}
+        self.output_mode = output_cfg.get("mode", "residual")
         self.output_base = output_cfg.get("base", "y_lifted")
         self.gate_mode = output_cfg.get("gate_mode", "joint_scalar")
+        if self.gate_mode == "per_joint":
+            self.gate_mode = "joint_scalar"
+        elif self.gate_mode == "global":
+            self.gate_mode = "sequence_scalar"
         self.gate_head = None
-        if self.output_base == "gated_y_xgeo":
+        self.gate_from_hidden = self.output_mode == "gate_only"
+        if self.output_base == "gated_y_xgeo" or self.output_mode == "gate_only":
             if self.gate_mode == "sequence_scalar":
                 gate_dim = 1
             elif self.gate_mode == "joint_scalar":
@@ -49,7 +55,8 @@ class ResidualMLP(nn.Module):
             gate_init = float(output_cfg.get("gate_init_y_weight", 0.8))
             gate_init = min(max(gate_init, 1e-4), 1.0 - 1e-4)
             gate_bias = math.log(gate_init / (1.0 - gate_init))
-            self.gate_head = nn.Linear(input_dim, gate_dim)
+            gate_input_dim = prev if self.gate_from_hidden else input_dim
+            self.gate_head = nn.Linear(gate_input_dim, gate_dim)
             nn.init.zeros_(self.gate_head.weight)
             nn.init.constant_(self.gate_head.bias, gate_bias)
 
@@ -58,11 +65,15 @@ class ResidualMLP(nn.Module):
         b, t, f = features.shape
         flat = features.reshape(b * t, f)
         hidden = self.trunk(flat)
-        dx = self.residual_head(hidden).reshape(b, t, self.num_joints, 3)
+        if self.output_mode == "gate_only":
+            dx = features.new_zeros((b, t, self.num_joints, 3))
+        else:
+            dx = self.residual_head(hidden).reshape(b, t, self.num_joints, 3)
         if self.gate_head is None:
             return dx
 
-        gate_logits = self.gate_head(flat)
+        gate_input = hidden if self.gate_from_hidden else flat
+        gate_logits = self.gate_head(gate_input)
         if self.gate_mode == "sequence_scalar":
             gate = torch.sigmoid(gate_logits).reshape(b, t, 1, 1).expand(-1, -1, self.num_joints, -1)
         elif self.gate_mode == "joint_scalar":
@@ -72,7 +83,16 @@ class ResidualMLP(nn.Module):
         return {"residual": dx, "gate": gate}
 
 
-def build_features(y_lifted, u_norm, raw_meta, z_features, input_cfg, ray_features=None, x_geo_features=None):
+def build_features(
+    y_lifted,
+    u_norm,
+    raw_meta,
+    z_features,
+    input_cfg,
+    ray_features=None,
+    x_geo_features=None,
+    reliability_features=None,
+):
     """Build per-frame corrector features.
 
     All tensors are torch tensors.
@@ -101,7 +121,7 @@ def build_features(y_lifted, u_norm, raw_meta, z_features, input_cfg, ray_featur
             raise ValueError("z_features are required when use_camera_parameters=true")
         parts.append(z_features[:, None, :].expand(-1, t, -1))
 
-    if input_cfg.get("use_ray_features", False):
+    if bool(input_cfg.get("use_ray_features", False)) or bool(input_cfg.get("use_rays", False)):
         if ray_features is None:
             raise ValueError("ray_features are required when use_ray_features=true")
         parts.append(ray_features.reshape(b, t, -1))
@@ -110,6 +130,11 @@ def build_features(y_lifted, u_norm, raw_meta, z_features, input_cfg, ray_featur
         if x_geo_features is None:
             raise ValueError("x_geo_features are required when use_geometry_fit_3d=true")
         parts.append(x_geo_features.reshape(b, t, -1))
+
+    if input_cfg.get("use_reliability_features", False):
+        if reliability_features is None:
+            raise ValueError("reliability_features are required when use_reliability_features=true")
+        parts.append(reliability_features.reshape(b, t, -1))
 
     if not parts:
         raise ValueError("At least one corrector input must be enabled.")
@@ -127,5 +152,6 @@ def infer_input_dim(sample, input_cfg):
     ray = torch.from_numpy(sample["ray_features"][:1]) if "ray_features" in sample else None
     x_geo_key = "x_geo_used" if "x_geo_used" in sample else "x_geo"
     x_geo = torch.from_numpy(sample[x_geo_key][:1]) if x_geo_key in sample else None
-    feat = build_features(y, u, m, z, input_cfg, ray_features=ray, x_geo_features=x_geo)
+    rel = torch.from_numpy(sample["reliability_features"][:1]) if "reliability_features" in sample else None
+    feat = build_features(y, u, m, z, input_cfg, ray_features=ray, x_geo_features=x_geo, reliability_features=rel)
     return int(feat.shape[-1])
