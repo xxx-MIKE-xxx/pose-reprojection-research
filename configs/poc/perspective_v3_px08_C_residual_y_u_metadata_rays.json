@@ -1,0 +1,45 @@
+{
+  "experiment_name": "perspective_v3_px08_C_residual_y_u_metadata_rays",
+  "seed": 1234,
+  "output_dir": "outputs/poc/perspective_v3_px08_C_residual_y_u_metadata_rays",
+  "dataset": {
+    "reuse_synthetic_dataset": "outputs/poc/perspective_v2_fixed_px08_dataset/synthetic_dataset.npz"
+  },
+  "corrector_output": {
+    "mode": "residual",
+    "base": "y_lifted"
+  },
+  "geometry_features": {
+    "enabled": true,
+    "use_input_rays": true,
+    "ray_feature_mode": "root_centered_unit_rays",
+    "canonicalize_root_ray": false,
+    "root_joint": 0
+  },
+  "corrector_inputs": {
+    "use_lifter_3d": true,
+    "use_lifter_2d_normalized": true,
+    "use_raw_2d_metadata": true,
+    "use_camera_parameters": false,
+    "use_ray_features": true,
+    "ray_ablation": "true",
+    "use_geometry_fit_3d": false
+  },
+  "corrector_normalization": {
+    "enabled": true,
+    "root_joint": 0,
+    "scale_mode": "stable_bones",
+    "eps": 0.000001
+  },
+  "geometry_refinement": {
+    "enabled": false
+  },
+  "lifter": {
+    "batch_size": 4
+  },
+  "training": {
+    "epochs": 50,
+    "batch_size": 8,
+    "patience": 12
+  }
+}
